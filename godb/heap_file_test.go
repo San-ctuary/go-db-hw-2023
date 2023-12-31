@@ -65,9 +65,10 @@ func TestDeleteHeapFile(t *testing.T) {
 	_, t1, t2, hf, _, tid := makeTestVars()
 	hf.insertTuple(&t1, tid)
 	hf.insertTuple(&t2, tid)
+	iter, _ := hf.Iterator(tid)
 
 	hf.deleteTuple(&t1, tid)
-	iter, _ := hf.Iterator(tid)
+	//iter, _ := hf.Iterator(tid)
 	t3, _ := iter()
 	if t3 == nil {
 		t.Errorf("HeapFile iterator expected 1 tuple")
@@ -99,6 +100,7 @@ func testSerializeN(t *testing.T, n int) {
 		// hack to force dirty pages to disk
 		// because CommitTransaction may not be implemented
 		// yet if this is called in lab 1 or 2
+		// 这里太无语了， 前面也没说page必须从0开始
 		if i%10 == 0 {
 			for j := hf.NumPages() - 1; j > -1; j-- {
 				pg, err := bp.GetPage(hf, j, tid, ReadPerm)

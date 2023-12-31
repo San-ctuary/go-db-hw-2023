@@ -24,6 +24,7 @@ const (
 	IllegalOperationError   GoDBErrorCode = iota
 	DeadlockError           GoDBErrorCode = iota
 	IllegalTransactionError GoDBErrorCode = iota
+	IllegalIdxError         GoDBErrorCode = iota
 )
 
 type GoDBError struct {

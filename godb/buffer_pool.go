@@ -15,18 +15,28 @@ const (
 
 type BufferPool struct {
 	// TODO: some code goes here
+	mapPage map[any]*Page
+	dbfile  DBFile
 }
 
 // Create a new BufferPool with the specified number of pages
 func NewBufferPool(numPages int) *BufferPool {
 	// TODO: some code goes here
-	return &BufferPool{}
+	return &BufferPool{
+		mapPage: make(map[any]*Page, numPages),
+	}
 }
 
 // Testing method -- iterate through all pages in the buffer pool
 // and flush them using [DBFile.flushPage]. Does not need to be thread/transaction safe
 func (bp *BufferPool) FlushAllPages() {
 	// TODO: some code goes here
+	// 这里是需要实现的， 文档中未告知
+	for _, page := range bp.mapPage {
+		if (*page).isDirty() {
+			bp.dbfile.flushPage(page)
+		}
+	}
 }
 
 // Abort the transaction, releasing locks. Because GoDB is FORCE/NO STEAL, none
@@ -63,5 +73,29 @@ func (bp *BufferPool) BeginTransaction(tid TransactionID) error {
 // of pages in the BufferPool in a map keyed by the [DBFile.pageKey].
 func (bp *BufferPool) GetPage(file DBFile, pageNo int, tid TransactionID, perm RWPerm) (*Page, error) {
 	// TODO: some code goes here
-	return nil, nil
+	key := file.pageKey(pageNo)
+	page, ok := bp.mapPage[key]
+
+	if ok {
+		return page, nil
+	}
+	// page not in cache
+	page, err := file.readPage(pageNo)
+	cnt := len(bp.mapPage)
+	// delete a page if it is not dirty
+	if cnt == PageSize {
+		flag := true
+		for key, p := range bp.mapPage {
+			if !(*p).isDirty() {
+				delete(bp.mapPage, key)
+				flag = false
+				break
+			}
+		}
+		if flag {
+			return nil, GoDBError{BufferPoolFullError, "buffer pool is full"}
+		}
+	}
+	bp.mapPage[key] = page
+	return page, err
 }
