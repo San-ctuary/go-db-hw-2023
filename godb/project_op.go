@@ -6,6 +6,7 @@ type Project struct {
 	child        Operator
 	//add additional fields here
 	// TODO: some code goes here
+	distinct bool
 }
 
 // Project constructor -- should save the list of selected field, child, and the child op.
@@ -15,7 +16,11 @@ type Project struct {
 // only distinct results, and child is the child operator.
 func NewProjectOp(selectFields []Expr, outputNames []string, distinct bool, child Operator) (Operator, error) {
 	// TODO: some code goes here
-	return nil, nil
+	if len(selectFields) != len(outputNames) {
+		return nil, nil
+	}
+	p := &Project{selectFields: selectFields, outputNames: outputNames, distinct: distinct, child: child}
+	return p, nil
 }
 
 // Return a TupleDescriptor for this projection. The returned descriptor should contain
@@ -24,8 +29,15 @@ func NewProjectOp(selectFields []Expr, outputNames []string, distinct bool, chil
 // HINT: you can use expr.GetExprType() to get the field type
 func (p *Project) Descriptor() *TupleDesc {
 	// TODO: some code goes here
-	return nil
-
+	fts := make([]FieldType, 0)
+	for idx, field := range p.selectFields {
+		fName := p.outputNames[idx]
+		fieldInfo := field.GetExprType()
+		ft := FieldType{Ftype: fieldInfo.Ftype, TableQualifier: fieldInfo.TableQualifier, Fname: fName}
+		fts = append(fts, ft)
+	}
+	desc := &TupleDesc{fts}
+	return desc
 }
 
 // Project operator implementation.  This function should iterate over the
@@ -36,5 +48,48 @@ func (p *Project) Descriptor() *TupleDesc {
 // optional as specified in the lab 2 assignment.
 func (p *Project) Iterator(tid TransactionID) (func() (*Tuple, error), error) {
 	// TODO: some code goes here
-	return nil, nil
+	mp := make(map[any]bool, 0)
+	iter, err := p.child.Iterator(tid)
+	if err != nil {
+		return nil, nil
+	}
+	//fields := make([]FieldType, 0)
+	//for _, field := range p.selectFields {
+	//	f := field.GetExprType()
+	//	fields = append(fields, f)
+	//}
+	return func() (*Tuple, error) {
+		for {
+			tuple, err := iter()
+			if err != nil {
+				return nil, err
+			}
+			if tuple == nil {
+				return nil, nil
+			}
+			var fields []DBValue = make([]DBValue, 0)
+			for _, field := range p.selectFields {
+				dbValue, err := field.EvalExpr(tuple)
+				if err != nil {
+					return nil, err
+				}
+				fields = append(fields, dbValue)
+			}
+			projectTup := &Tuple{*p.Descriptor(), fields, nil}
+			//projectTup, err := tuple.project(fields)
+			//projectTup.Desc = *p.Descriptor()
+			if err != nil {
+				return nil, err
+			}
+			if p.distinct {
+				key := projectTup.tupleKey()
+				if _, ok := mp[key]; !ok {
+					mp[key] = true
+					return projectTup, nil
+				}
+			} else {
+				return projectTup, nil
+			}
+		}
+	}, nil
 }

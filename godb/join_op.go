@@ -52,7 +52,10 @@ func NewStringJoin(left Operator, leftField Expr, right Operator, rightField Exp
 // HINT: use the merge function you implemented for TupleDesc in lab1
 func (hj *EqualityJoin[T]) Descriptor() *TupleDesc {
 	// TODO: some code goes here
-	return nil
+	leftDesc := (*hj.left).Descriptor()
+	rightDesc := (*hj.left).Descriptor()
+	merge := leftDesc.merge(rightDesc)
+	return merge
 }
 
 // Join operator implementation.  This function should iterate over the results
@@ -72,5 +75,55 @@ func (hj *EqualityJoin[T]) Descriptor() *TupleDesc {
 func (joinOp *EqualityJoin[T]) Iterator(tid TransactionID) (func() (*Tuple, error), error) {
 
 	// TODO: some code goes here
-	return nil, nil
+	leftIter, _ := (*joinOp.left).Iterator(tid)
+	var rightTuple *Tuple = nil
+	var leftTuple *Tuple = nil
+	var rightIter func() (*Tuple, error) = nil
+	var mp map[T][]*Tuple
+	endFlag := false
+	idx := 0
+	return func() (*Tuple, error) {
+		for {
+			// rightTuple为nil的时候， 迭代maxBufferSize个leftTuple的值到mp中
+			if rightTuple == nil {
+				mp = make(map[T][]*Tuple, joinOp.maxBufferSize)
+				for i := 0; i < joinOp.maxBufferSize; i++ {
+					leftTuple, _ = leftIter()
+					if leftTuple == nil {
+						endFlag = true
+						break
+					}
+					v, _ := joinOp.leftField.EvalExpr(leftTuple)
+					leftValue := joinOp.getter(v)
+					if _, ok := mp[leftValue]; !ok {
+						mp[leftValue] = make([]*Tuple, 0)
+					}
+					mp[leftValue] = append(mp[leftValue], leftTuple)
+				}
+				// 每次leftIter迭代之后， rightIter都要从头开始
+				rightIter, _ = (*joinOp.right).Iterator(tid)
+			}
+			for {
+				if idx == 0 {
+					rightTuple, _ = rightIter()
+					if rightTuple == nil {
+						if endFlag {
+							return nil, nil
+						}
+						break
+					}
+				}
+				v, _ := joinOp.rightField.EvalExpr(rightTuple)
+				rightValue := joinOp.getter(v)
+				if leftLst, ok := mp[rightValue]; ok {
+					for idx < len(leftLst) {
+						leftTuple := leftLst[idx]
+						idx += 1
+						return joinTuples(leftTuple, rightTuple), nil
+					}
+					idx = 0
+				}
+			}
+		}
+	}, nil
 }

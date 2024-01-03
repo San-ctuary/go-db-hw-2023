@@ -41,7 +41,42 @@ func NewAggregator(emptyAggState []AggState, child Operator) *Aggregator {
 // HINT: use the merge function you implemented for TupleDesc in lab1 to merge the two TupleDescs
 func (a *Aggregator) Descriptor() *TupleDesc {
 	// TODO: some code goes here
-	return nil // TODO change me
+	var ft FieldType
+	var aggDesc *TupleDesc
+	null := true
+	for _, aggState := range a.newAggState {
+		desc := aggState.GetTupleDesc()
+		if null {
+			aggDesc = desc
+			null = false
+		} else {
+			aggDesc.merge(desc)
+		}
+	}
+	var groupByDesc *TupleDesc
+	null = true
+	for _, fieldInfo := range a.groupByFields {
+		fType := fieldInfo.GetExprType().Ftype
+		switch fType {
+		case IntType:
+			ft = FieldType{fieldInfo.GetExprType().Fname, "", IntType}
+		case StringType:
+			ft = FieldType{fieldInfo.GetExprType().Fname, "", StringType}
+		}
+		fts := []FieldType{ft}
+		td := &TupleDesc{}
+		td.Fields = fts
+		if null {
+			groupByDesc = td
+			null = false
+		} else {
+			groupByDesc.merge(td)
+		}
+	}
+	if groupByDesc != nil {
+		return groupByDesc.merge(aggDesc)
+	}
+	return aggDesc // TODO change me
 }
 
 // Aggregate operator implementation: This function should iterate over the results of
@@ -74,6 +109,7 @@ func (a *Aggregator) Iterator(tid TransactionID) (func() (*Tuple, error), error)
 		aggState[DefaultGroup] = &newAggState
 	}
 	// the list of group key tuples
+	// 可以拿到所有group by分组
 	var groupByList []*Tuple
 	// the iterator for iterating thru the finalized aggregation results for each group
 	var finalizedIter func() (*Tuple, error)
@@ -133,7 +169,15 @@ func (a *Aggregator) Iterator(tid TransactionID) (func() (*Tuple, error), error)
 // If there is any error during expression evaluation, return the error.
 func extractGroupByKeyTuple(a *Aggregator, t *Tuple) (*Tuple, error) {
 	// TODO: some code goes here
-	return nil, nil // TODO change me
+	tuple := &Tuple{Rid: t.Rid, Fields: make([]DBValue, 0)}
+	for _, groupByExpr := range a.groupByFields {
+		dbValue, err := groupByExpr.EvalExpr(t)
+		if err != nil {
+			return nil, nil
+		}
+		tuple.Fields = append(tuple.Fields, dbValue)
+	}
+	return tuple, nil // TODO change me
 }
 
 // Given a tuple t from child and (a pointer to) the array of partially computed aggregates
@@ -143,6 +187,12 @@ func extractGroupByKeyTuple(a *Aggregator, t *Tuple) (*Tuple, error) {
 // element of the a.newAggState field and add the new aggState to grpAggState.
 func addTupleToGrpAggState(a *Aggregator, t *Tuple, grpAggState *[]AggState) {
 	// TODO: some code goes here
+	for idx, state := range *grpAggState {
+		if state == nil {
+			(*grpAggState)[idx] = a.newAggState[idx].Copy()
+		}
+		(*grpAggState)[idx].AddTuple(t)
+	}
 }
 
 // Given that all child tuples have been added, return an iterator that iterates
@@ -153,8 +203,22 @@ func addTupleToGrpAggState(a *Aggregator, t *Tuple, grpAggState *[]AggState) {
 // joinTuples function in tuple.go you wrote in lab 1.
 func getFinalizedTuplesIterator(a *Aggregator, groupByList []*Tuple, aggState map[any]*[]AggState) func() (*Tuple, error) {
 	// curGbyTuple := 0 // "captured" counter to track the current tuple we are iterating over
+	curGbyTuple := 0
 	return func() (*Tuple, error) {
 		// TODO: some code goes here
-		return nil, nil // TODO change me
+		for curGbyTuple < len(groupByList) {
+			tuple := groupByList[curGbyTuple]
+			key := tuple.tupleKey()
+			newAggState := aggState[key]
+			var tup *Tuple
+			for i := 0; i < len(*newAggState); i++ {
+				newTup := (*newAggState)[i].Finalize()
+				tup = joinTuples(tuple, newTup)
+			}
+			curGbyTuple += 1
+			tup.Desc = *a.Descriptor()
+			return tup, nil
+		}
+		return nil, nil
 	}
 }

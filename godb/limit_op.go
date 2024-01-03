@@ -10,14 +10,13 @@ type LimitOp struct {
 // lim is how many tuples to return and child is the child op.
 func NewLimitOp(lim Expr, child Operator) *LimitOp {
 	// TODO: some code goes here
-	return nil
+	return &LimitOp{child: child, limitTups: lim}
 }
 
 // Return a TupleDescriptor for this limit
 func (l *LimitOp) Descriptor() *TupleDesc {
 	// TODO: some code goes here
-	return nil
-
+	return l.child.Descriptor()
 }
 
 // Limit operator implementation. This function should iterate over the
@@ -25,5 +24,28 @@ func (l *LimitOp) Descriptor() *TupleDesc {
 // [lim] tuples it sees (where lim is specified in the constructor).
 func (l *LimitOp) Iterator(tid TransactionID) (func() (*Tuple, error), error) {
 	// TODO: some code goes here
-	return nil, nil
+	lim, err := l.limitTups.EvalExpr(nil)
+	if err != nil {
+		return nil, nil
+	}
+	limit := lim.(IntField).Value
+	iter, err := l.child.Iterator(tid)
+	if err != nil {
+		return nil, nil
+	}
+	return func() (*Tuple, error) {
+		for limit > 0 {
+			tuple, err := iter()
+			if err != nil {
+				return nil, nil
+			}
+			if tuple == nil {
+				limit = 0
+				break
+			}
+			limit -= 1
+			return tuple, nil
+		}
+		return nil, nil
+	}, nil
 }
