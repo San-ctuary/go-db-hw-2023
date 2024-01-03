@@ -15,15 +15,17 @@ const (
 
 type BufferPool struct {
 	// TODO: some code goes here
-	mapPage map[any]*Page
-	dbfile  DBFile
+	mapPage  map[any]*Page
+	dbfile   DBFile
+	numPages int
 }
 
 // Create a new BufferPool with the specified number of pages
 func NewBufferPool(numPages int) *BufferPool {
 	// TODO: some code goes here
 	return &BufferPool{
-		mapPage: make(map[any]*Page, numPages),
+		mapPage:  make(map[any]*Page, numPages),
+		numPages: numPages,
 	}
 }
 
@@ -81,9 +83,12 @@ func (bp *BufferPool) GetPage(file DBFile, pageNo int, tid TransactionID, perm R
 	}
 	// page not in cache
 	page, err := file.readPage(pageNo)
+	if err != nil {
+		return nil, err
+	}
 	cnt := len(bp.mapPage)
 	// delete a page if it is not dirty
-	if cnt == PageSize {
+	if cnt == bp.numPages {
 		flag := true
 		for key, p := range bp.mapPage {
 			if !(*p).isDirty() {

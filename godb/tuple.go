@@ -251,9 +251,14 @@ func (t1 *Tuple) equals(t2 *Tuple) bool {
 func joinTuples(t1 *Tuple, t2 *Tuple) *Tuple {
 	// TODO: some code goes here
 	result := &Tuple{}
-	result.Desc = *t1.Desc.copy()
-	result.Fields = make([]DBValue, len(t1.Fields))
-	copy(result.Fields, t1.Fields)
+	if t1 != nil {
+		result.Desc = *t1.Desc.copy()
+		result.Fields = make([]DBValue, len(t1.Fields))
+		copy(result.Fields, t1.Fields)
+	}
+	if t2 == nil {
+		return result
+	}
 	for idx, f := range t2.Fields {
 		result.Fields = append(result.Fields, f)
 		result.Desc.Fields = append(result.Desc.Fields, t2.Desc.Fields[idx])
