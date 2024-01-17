@@ -45,6 +45,7 @@ func NewHeapFile(fromFile string, td *TupleDesc, bp *BufferPool) (*HeapFile, err
 		fileName: fromFile,
 		file:     file,
 	}
+	//  这里绑定是否有问题
 	bp.dbfile = DBFile(heapFile)
 	return heapFile, nil //replace me
 }
@@ -178,7 +179,9 @@ func (f *HeapFile) insertTuple(t *Tuple, tid TransactionID) error {
 		}
 		heapPage := (*page).(*heapPage)
 		if heapPage.usedSlots != heapPage.numSlots {
+			f.Lock()
 			_, err := heapPage.insertTuple(t)
+			f.Unlock()
 			heapPage.setDirty(true)
 			if err != nil {
 				return err
@@ -187,16 +190,27 @@ func (f *HeapFile) insertTuple(t *Tuple, tid TransactionID) error {
 			}
 		}
 	}
-	newPage := newHeapPage(&t.Desc, f.NumPages(), f)
-	_, err := newPage.insertTuple(t)
+	pageNum := f.NumPages()
+	newPage := newHeapPage(&t.Desc, pageNum, f)
+	writePage := Page(newPage)
+	// need to flush page
+	err := f.flushPage(&writePage)
 	if err != nil {
 		return err
 	}
-	writePage := Page(newPage)
-	// need to flush page
-	err = f.flushPage(&writePage)
+	page, err := bf.GetPage(f, pageNum, tid, WritePerm)
 	if err != nil {
 		return err
+	}
+	heapPage := (*page).(*heapPage)
+	f.Lock()
+	_, err = heapPage.insertTuple(t)
+	f.Unlock()
+	heapPage.setDirty(true)
+	if err != nil {
+		return err
+	} else {
+		return nil
 	}
 	return nil //replace me
 }
@@ -210,13 +224,18 @@ func (f *HeapFile) insertTuple(t *Tuple, tid TransactionID) error {
 // heap page and slot within the page that the tuple came from.
 func (f *HeapFile) deleteTuple(t *Tuple, tid TransactionID) error {
 	// TODO: some code goes here
+	fmt.Printf("%d before get delete lock mu\n", *tid)
+	fmt.Printf("%d success get delete lock mu\n", *tid)
 	rid := t.Rid.(heapFileRID)
-	page, err := f.bufPool.GetPage(f, rid.pageNum, tid, ReadPerm)
+	page, err := f.bufPool.GetPage(f, rid.pageNum, tid, WritePerm)
 	if err != nil {
 		return err
 	}
 	heappage := (*page).(*heapPage)
+	//此处之前位置错误
+	f.Lock()
 	err = heappage.deleteTuple(rid)
+	f.Unlock()
 	heappage.setDirty(true)
 	if err != nil {
 		return err
@@ -278,7 +297,8 @@ func (f *HeapFile) Iterator(tid TransactionID) (func() (*Tuple, error), error) {
 				}
 				page, err := f.bufPool.GetPage(f, pageId, tid, ReadPerm)
 				if err != nil {
-					return nil, nil
+					// todo 这里返回err会导致app_op_test.go通过失败，
+					return nil, err
 				}
 				heappage := (*page).(*heapPage)
 				iter = heappage.tupleIter()

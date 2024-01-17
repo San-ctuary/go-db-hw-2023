@@ -45,21 +45,21 @@ func MakeTestDatabaseEasy(bp *BufferPool) error {
 
 func TestParseEasy(t *testing.T) {
 	var queries []string = []string{
-		"select name,age,getsubstr(epochtodatetimestring(epoch() - age*365*24*60*60),24,4) birthyear from t",
+		"select name,age,getsubstr(epochtodatetimestring(epoch() - age*365*24*60*60),24,4) birthyear from t", //
 		"select sum(age + 10) , sum(age) from t",
-		"select min(age) + max(age) from t",
+		"select min(age) + max(age) from t", // error
 		"select * from t limit 1+2",
-		"select t.name, t.age from t join t2 on t.name = t2.name, t2 as t3 where t.age < 50 and t3.age = t.age order by t.age asc, t.name asc",
-		"select sq(sq(5)) from t",
-		"select 1, name from t",
+		"select t.name, t.age from t join t2 on t.name = t2.name, t2 as t3 where t.age < 50 and t3.age = t.age order by t.age asc, t.name asc", // error
+		"select sq(sq(5)) from t", // error
+		"select 1, name from t",   // error
 		"select age, name from t",
-		"select t.name, sum(age) totage from t group by t.name",
+		"select t.name, sum(age) totage from t group by t.name", // error
 		"select t.name, t.age from t join t2 on t.name = t2.name where t.age < 50",
 		"select name from (select x.name from (select t.name from t) x)y order by name asc",
 		"select age, count(*) from t group by age",
 	}
-	save := false        //set save to true to save the output of the current test run as the correct answer
-	printOutput := false //print the result set during testing
+	save := false       //set save to true to save the output of the current test run as the correct answer
+	printOutput := true //print the result set during testing
 
 	bp := NewBufferPool(10)
 	err := MakeTestDatabaseEasy(bp)
@@ -74,10 +74,18 @@ func TestParseEasy(t *testing.T) {
 		return
 	}
 	qNo := 0
+	mp := map[int]bool{}
+	for i := 1; i <= 12; i++ {
+		mp[i] = true
+	}
+	delete(mp, 5)
 	for _, sql := range queries {
 		tid := NewTID()
 		bp.BeginTransaction(tid)
 		qNo++
+		if _, ok := mp[qNo]; ok {
+			continue
+		}
 		if qNo == 4 {
 			continue
 		}

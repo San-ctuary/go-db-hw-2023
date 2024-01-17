@@ -16,7 +16,7 @@ import (
 // reinserted into this file unless you delete (e.g., with [os.Remove] it before
 // calling NewHeapFile.
 func computeFieldSum(fileName string, td TupleDesc, sumField string) (int, error) {
-	bp := NewBufferPool(0)
+	bp := NewBufferPool(10)
 	split := strings.Split(fileName, ".")
 	heapfileName := split[0] + ".dat"
 	os.Remove(heapfileName)

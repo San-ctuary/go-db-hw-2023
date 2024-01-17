@@ -50,7 +50,7 @@ func (l *lockInfo) unlockByType(tid TransactionID) {
 		l.mu.Unlock()
 	case InitState:
 	default:
-		fmt.Printf("lockstate is %v", l.lockState)
+		fmt.Printf("lockstate is %v\n", l.lockState)
 		l.lockState -= 1
 		l.mu.RUnlock()
 	}
@@ -58,25 +58,27 @@ func (l *lockInfo) unlockByType(tid TransactionID) {
 
 type BufferPool struct {
 	// TODO: some code goes here
-	mapPage   map[any]*Page
-	dbfile    DBFile
-	numPages  int
-	mu        sync.Mutex
-	abortmu   sync.Mutex
-	tidMap    map[TransactionID][]int
-	lockmap   map[int]*lockInfo
-	waitGraph map[TransactionID][]TransactionID
+	mapPage     map[any]*Page
+	dbfile      DBFile
+	numPages    int
+	mu          sync.Mutex
+	abortmu     sync.Mutex
+	tidMap      map[TransactionID][]int
+	lockmap     map[int]*lockInfo
+	waitGraph   map[TransactionID]map[TransactionID]any
+	tidPagesDep map[TransactionID][]int
 }
 
 // Create a new BufferPool with the specified number of pages
 func NewBufferPool(numPages int) *BufferPool {
 	// TODO: some code goes here
 	return &BufferPool{
-		mapPage:   make(map[any]*Page, numPages),
-		numPages:  numPages,
-		tidMap:    make(map[TransactionID][]int),
-		lockmap:   make(map[int]*lockInfo),
-		waitGraph: make(map[TransactionID][]TransactionID),
+		mapPage:     make(map[any]*Page, numPages),
+		numPages:    numPages,
+		tidMap:      make(map[TransactionID][]int),
+		lockmap:     make(map[int]*lockInfo),
+		waitGraph:   make(map[TransactionID]map[TransactionID]any),
+		tidPagesDep: make(map[TransactionID][]int),
 	}
 }
 
@@ -119,7 +121,7 @@ func (bp *BufferPool) AbortTransaction(tid TransactionID) {
 	//bp.abortmu.Lock()
 	bp.mu.Lock()
 	fmt.Println("abort transaction: ", *tid)
-	printMap(bp.waitGraph)
+	//printMap(bp.waitGraph)
 	pages := bp.tidMap[tid]
 	for _, pageId := range pages {
 		pageKey := bp.dbfile.pageKey(pageId)
@@ -129,7 +131,8 @@ func (bp *BufferPool) AbortTransaction(tid TransactionID) {
 		delete(lInfo.mp, tid)
 	}
 	delete(bp.tidMap, tid)
-	bp.delEdges(tid)
+	//bp.delEdges(tid)
+	bp.deleteTidToPagesDep(tid)
 	//bp.abortmu.Unlock()
 	bp.mu.Unlock()
 }
@@ -156,7 +159,8 @@ func (bp *BufferPool) CommitTransaction(tid TransactionID) {
 		delete(lInfo.mp, tid)
 	}
 	delete(bp.tidMap, tid)
-	bp.delEdges(tid)
+	//bp.delEdges(tid)
+	bp.deleteTidToPagesDep(tid)
 
 }
 
@@ -208,7 +212,8 @@ func (bp *BufferPool) GetPage(file DBFile, pageNo int, tid TransactionID, perm R
 				flag := false
 				for !lInfo.mu.TryRLock() {
 					if cnt == 0 {
-						bp.addEdges(tid, lInfo.mp)
+						//bp.addEdges(tid, lInfo.mp)
+						bp.addTidToPagesDep(tid, pageNo)
 						flag = true
 						bp.mu.Unlock()
 					}
@@ -266,7 +271,8 @@ func (bp *BufferPool) GetPage(file DBFile, pageNo int, tid TransactionID, perm R
 				flag := false
 				for !lInfo.mu.TryLock() {
 					if cnt == 0 {
-						bp.addEdges(tid, lInfo.mp)
+						//bp.addEdges(tid, lInfo.mp)
+						bp.addTidToPagesDep(tid, pageNo)
 						flag = true
 						bp.mu.Unlock()
 					}
@@ -298,7 +304,8 @@ func (bp *BufferPool) GetPage(file DBFile, pageNo int, tid TransactionID, perm R
 			flag := false
 			for !lInfo.mu.TryLock() {
 				if cnt == 0 {
-					bp.addEdges(tid, lInfo.mp)
+					//bp.addEdges(tid, lInfo.mp)
+					bp.addTidToPagesDep(tid, pageNo)
 					flag = true
 					bp.mu.Unlock()
 				}
@@ -350,12 +357,30 @@ func (bp *BufferPool) GetPage(file DBFile, pageNo int, tid TransactionID, perm R
 			return nil, GoDBError{BufferPoolFullError, "buffer pool is full"}
 		}
 	}
+	bp.mu.Lock()
 	bp.mapPage[key] = page
+	bp.mu.Unlock()
 	return page, err
 }
 
+func (bp *BufferPool) buildWaitGraph() {
+	for tid, pages := range bp.tidPagesDep {
+		waitTidsMap, ok := bp.waitGraph[tid]
+		if !ok {
+			waitTidsMap = make(map[TransactionID]any)
+		}
+		for _, page := range pages {
+			pageInfo := bp.lockmap[page]
+			for totid := range pageInfo.mp {
+				waitTidsMap[totid] = true
+			}
+		}
+		bp.waitGraph[tid] = waitTidsMap
+	}
+}
 func (bp *BufferPool) deadLockDetection(tid TransactionID) bool {
 	bp.mu.Lock()
+	bp.buildWaitGraph()
 	defer bp.mu.Unlock()
 	f := make(map[int]int)
 	for key, value := range bp.waitGraph {
@@ -364,7 +389,7 @@ func (bp *BufferPool) deadLockDetection(tid TransactionID) bool {
 			f[from] = from
 		}
 		pa := find(from, f)
-		for _, to := range value {
+		for to := range value {
 			next := *to
 			if _, ok := f[next]; !ok {
 				f[next] = next
@@ -395,25 +420,38 @@ func getValues(mp map[TransactionID]any) (arr []TransactionID) {
 	return
 }
 
-func (bp *BufferPool) addEdges(from TransactionID, mp map[TransactionID]any) {
-	arr := getValues(mp)
-	edges, ok := bp.waitGraph[from]
+func (bp *BufferPool) addTidToPagesDep(from TransactionID, page int) {
+	pages, ok := bp.tidPagesDep[from]
 	if !ok {
-		edges = []TransactionID{}
+		pages = []int{page}
 	}
-	toMap := make(map[TransactionID]any)
-	for _, edge := range edges {
-		toMap[edge] = true
-	}
-	for _, to := range arr {
-		if _, ok := toMap[to]; ok {
-			continue
-		}
-		toMap[to] = true
-		edges = append(edges, to)
-	}
-	bp.waitGraph[from] = edges
+	pages = append(pages, page)
+	bp.tidPagesDep[from] = pages
 }
+
+func (bp *BufferPool) deleteTidToPagesDep(from TransactionID) {
+	delete(bp.tidPagesDep, from)
+}
+
+//func (bp *BufferPool) addEdges(from TransactionID, mp map[TransactionID]any) {
+//	arr := getValues(mp)
+//	edges, ok := bp.waitGraph[from]
+//	if !ok {
+//		edges = []TransactionID{}
+//	}
+//	toMap := make(map[TransactionID]any)
+//	for _, edge := range edges {
+//		toMap[edge] = true
+//	}
+//	for _, to := range arr {
+//		if _, ok := toMap[to]; ok {
+//			continue
+//		}
+//		toMap[to] = true
+//		edges = append(edges, to)
+//	}
+//	bp.waitGraph[from] = edges
+//}
 
 func (bp *BufferPool) delEdges(tid TransactionID) {
 	delete(bp.waitGraph, tid)

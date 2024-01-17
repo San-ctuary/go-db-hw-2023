@@ -260,6 +260,7 @@ func validateTransactions(t *testing.T, threads int) {
 
 		for tid := TransactionID(nil); ; bp.AbortTransaction(tid) {
 			tid = NewTID()
+			fmt.Println("tid is:", *tid)
 			bp.BeginTransaction(tid)
 			iter1, err := hf.Iterator(tid)
 			if err != nil {
@@ -268,6 +269,7 @@ func validateTransactions(t *testing.T, threads int) {
 
 			readTup, err := iter1()
 			if err != nil {
+				fmt.Println(err)
 				continue
 			}
 
@@ -279,6 +281,7 @@ func validateTransactions(t *testing.T, threads int) {
 				}}
 
 			time.Sleep(1 * time.Millisecond)
+			fmt.Printf("tid:%v success read\n", *tid)
 
 			dop := NewDeleteOp(hf, hf)
 			iterDel, err := dop.Iterator(tid)
@@ -286,6 +289,7 @@ func validateTransactions(t *testing.T, threads int) {
 				continue
 			}
 			delCnt, err := iterDel()
+			fmt.Printf("tid:%v success delete\n", *tid)
 			if err != nil {
 				continue
 			}
